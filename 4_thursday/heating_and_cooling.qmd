@@ -1,0 +1,607 @@
+---
+title: "Heating and Cooling in UCLCHEM"
+jupyter: uclchem_school
+format:
+  revealjs:
+    theme: default
+    code-line-numbers: true
+    highlight-style: github
+    slide-number: true
+    scrollable: true
+    chalkboard: true
+    incremental: true
+execute:
+  eval: true
+  echo: true
+---
+
+```{python}
+
+```
+## Heating and Cooling in UCLCHEM
+This presentation covers using heating and cooling to self-consistently model the temperature evolution in UCLCHEM.
+
+---
+
+## Overview
+
+**Heating processes:**
+
+- Photoelectric heating from PAHs and dust grains
+  - Option 1: Bakes & Tielens (1994) 
+  - Option 2: Weingartner & Draine (2001)
+- $\mathrm{H}_2$ formation
+- $\mathrm{H}_2$ photodissociation
+- $\mathrm{H}_2$ ultraviolet pumping
+- Carbon ionization heating
+- $\mathrm{H}_2$ Cosmic ray heating
+- Chemical reaction enthalpy (optional, disabled )
+- Turbulent heating
+- Gas grain collisional heating
+
+---
+
+## Overview
+
+**Cooling processes:**
+
+- Line cooling ($\mathrm{H, C^+, O, C, CO,p-H2, o-H2}$)
+- Atomic fine structure cooling
+- Continuum cooling from dust
+- $\mathrm{H}_2$ Vibrational
+- Gas grain collisional cooling
+
+
+---
+
+Then we can compute:
+$$ \frac{\mathrm{d}T_{\rm gas}}{\mathrm{d}t} = \frac{\gamma -1}{k_\mathrm{B} n_{\rm H,nuclei}}\left(\sum_m \Gamma_m - \sum_m \Lambda_m \right)
+$$
+where $\Gamma_m$ and $\Lambda_m$ are the heating and cooling rates for each process $m$. They depend on many different physical conditions:
+```{fortran}
+heatingValues(2) = photoelectricHeatingWeingartner(gasTemperature,gasDensity,habingField,abundances(nelec),metallicity)
+``` 
+
+# Preliminary plots from default models
+---
+### Default heating and cooling effects:
+![](figures/figure_b_high_rad_zeta.png){width=80%}
+
+### Gas phase temperature evolution:
+![](figures/figure_b_eq_comparison-1.png){width=80%}
+
+### Dust phase tempereatures:
+![](figures/figure_b_dust_temp.png){width=80%}
+
+### Dominant heating and cooling processes:
+![](figures/figure_b_dominant.png){width=80%}
+
+
+# Part 1 — Basic Usage
+
+---
+
+## Imports
+
+```{python}
+import uclchem
+import matplotlib.pyplot as plt
+```
+
+---
+
+## Example 1: Basic Model with Heating Enabled
+
+Let's start with a simple cloud model with heating and cooling enabled (the default behavior). We'll model a molecular cloud core at constant density.
+
+```{python}
+param_dict_heating = {
+    "initialDens": 1e4,  # Initial density (cm^-3)
+    "initialTemp": 10.0,  # Initial temperature (K)
+    "finalTime": 1.0e6,  # Final time (years)
+    "baseAv": 10.0,  # Visual extinction
+    "rout": 0.1,  # Outer radius (pc)
+    "freefall": False,
+    "heatingFlag": True,  # Enable heating (default)
+}
+
+cloud = uclchem.model.Cloud(param_dict=param_dict_heating)
+
+physics, abundances = cloud.get_dataframes(joined=False)
+_, _, rates = cloud.get_dataframes(joined=False, with_rates=True)
+_, _, heating = cloud.get_dataframes(joined=False, with_heating=True)
+```
+
+---
+
+## Example 1: Visualizing Temperature Evolution
+
+The `physics` DataFrame contains physical properties including gas temperature.
+
+```{python}
+fig, ax = plt.subplots(figsize=(10, 6))
+ax.plot(physics["Time"], physics["gasTemp"], linewidth=2, color="darkred")
+ax.set_xlabel("Time (years)", fontsize=12)
+ax.set_ylabel("Gas Temperature (K)", fontsize=12)
+ax.set_xscale("log")
+ax.set_title("Gas Temperature Evolution with Heating/Cooling", fontsize=14)
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Example 2: Comparing Heating On vs Off
+
+To see the impact of heating/cooling processes, let's run two models side by side.
+
+```{python}
+param_dict_no_heating = param_dict_heating.copy()
+param_dict_no_heating["heatingFlag"] = False
+
+cloud_no_heat = uclchem.model.Cloud(param_dict=param_dict_no_heating)
+
+physics_no_heat, abundances_no_heat = cloud_no_heat.get_dataframes(joined=False)
+_, _, heating_no_heat = cloud_no_heat.get_dataframes(joined=False, with_heating=True)
+```
+
+---
+
+## Example 2: Results
+
+```{python}
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+axes[0].plot(physics["Time"], physics["gasTemp"], label="Heating ON", linewidth=2)
+axes[0].plot(physics_no_heat["Time"], physics_no_heat["gasTemp"],
+             label="Heating OFF", linewidth=2, linestyle="--")
+axes[0].set_xlabel("Time (years)", fontsize=12)
+axes[0].set_ylabel("Gas Temperature (K)", fontsize=12)
+axes[0].set_xscale("log")
+axes[0].set_title("Temperature Evolution", fontsize=14)
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+axes[1].plot(physics["Time"], abundances["H2O"], label="Heating ON", linewidth=2)
+axes[1].plot(physics_no_heat["Time"], abundances_no_heat["H2O"],
+             label="Heating OFF", linewidth=2, linestyle="--")
+axes[1].set_xlabel("Time (years)", fontsize=12)
+axes[1].set_ylabel("H$_2$O Abundance", fontsize=12)
+axes[1].set_xscale("log")
+axes[1].set_yscale("log")
+axes[1].set_title("H₂O Abundance Evolution", fontsize=14)
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Example 3: Accessing Heating and Cooling Rates
+
+The `heating` DataFrame includes individual contributions from each process.
+
+```{python}
+heating_cols = [col for col in heating.columns if "heating" in col.lower() and col != "Time"]
+cooling_cols = [col for col in heating.columns if "cooling" in col.lower()]
+
+print(f"Found {len(heating_cols)} heating processes")
+print(f"Found {len(cooling_cols)} cooling processes")
+```
+
+---
+
+## Example 3: Plotting Individual Contributions
+
+```{python}
+fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+time = physics["Time"]
+
+for col in heating_cols:
+    if heating[col].abs().max() > 1e-30:
+        label = col.replace("_heating", "").replace("_", " ")
+        axes[0].plot(time, heating[col], label=label, linewidth=2, alpha=0.7)
+
+axes[0].set_xlabel("Time (years)", fontsize=12)
+axes[0].set_ylabel("Heating Rate (erg cm⁻³ s⁻¹)", fontsize=12)
+axes[0].set_xscale("log")
+axes[0].set_yscale("symlog", linthresh=1e-30)
+axes[0].set_title("Heating Processes", fontsize=14)
+axes[0].legend(fontsize=8, loc="best")
+axes[0].grid(True, alpha=0.3)
+
+for col in cooling_cols:
+    if heating[col].abs().max() > 1e-40:
+        label = col.replace("_cooling", "").replace("_", " ")
+        axes[1].plot(time, heating[col], label=label, linewidth=2, alpha=0.7)
+
+axes[1].set_xlabel("Time (years)", fontsize=12)
+axes[1].set_ylabel("Cooling Rate (erg cm⁻³ s⁻¹)", fontsize=12)
+axes[1].set_xscale("log")
+axes[1].set_yscale("symlog", linthresh=1e-30)
+axes[1].set_title("Major Cooling Processes", fontsize=14)
+axes[1].legend(fontsize=8, loc="best")
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Example 4: Writing Heating Rates to a File
+
+Use the `heatingFile` parameter to save detailed heating/cooling contributions to disk.
+
+```{python}
+# Uncomment to run a model to disk:
+
+# param_dict_with_file = param_dict_heating.copy()
+# param_dict_with_file["outputFile"] = "heating_demo.dat"
+# param_dict_with_file["heatingFile"] = "heating_rates.dat"
+
+# result = uclchem.model.cloud(
+#     param_dict=param_dict_with_file, out_species=["CO", "H2O", "OH"]
+# )
+```
+
+---
+
+## Example 5: Different Physical Conditions
+
+Compare a dense, cold core with a less dense, warmer environment.
+
+```{python}
+param_cold_core = {
+    "initialDens": 1e5, "initialTemp": 10.0, "finalTime": 1.0e6,
+    "baseAv": 20.0, "rout": 0.05, "freefall": False, "heatingFlag": True,
+}
+
+param_warm_cloud = {
+    "initialDens": 1e3, "initialTemp": 30.0, "finalTime": 1.0e6,
+    "baseAv": 5.0, "rout": 0.5, "freefall": False, "heatingFlag": True,
+}
+
+cloud_cold = uclchem.model.Cloud(param_dict=param_cold_core)
+phys_cold, abund_cold = cloud_cold.get_dataframes(joined=False)
+
+cloud_warm = uclchem.model.Cloud(param_dict=param_warm_cloud)
+phys_warm, abund_warm = cloud_warm.get_dataframes(joined=False)
+```
+
+---
+
+## Example 5: Results
+
+```{python}
+fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+axes[0].plot(phys_cold["Time"], phys_cold["gasTemp"],
+             label=f"Dense Core (n=1e5)", linewidth=2)
+axes[0].plot(phys_warm["Time"], phys_warm["gasTemp"],
+             label=f"Diffuse Cloud (n=1e3)", linewidth=2)
+axes[0].set_xlabel("Time (years)", fontsize=12)
+axes[0].set_ylabel("Gas Temperature (K)", fontsize=12)
+axes[0].set_xscale("log")
+axes[0].set_title("Temperature Evolution", fontsize=14)
+axes[0].legend()
+axes[0].grid(True, alpha=0.3)
+
+axes[1].plot(phys_cold["Time"], abund_cold["CO"], label="Dense Core", linewidth=2)
+axes[1].plot(phys_warm["Time"], abund_warm["CO"], label="Diffuse Cloud", linewidth=2)
+axes[1].set_xlabel("Time (years)", fontsize=12)
+axes[1].set_ylabel("CO Abundance", fontsize=12)
+axes[1].set_xscale("log")
+axes[1].set_yscale("log")
+axes[1].set_title("CO Abundance", fontsize=14)
+axes[1].legend()
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+
+---
+
+## Summary: Key Parameters
+
+| Parameter | Description |
+|---|---|
+| `heatingFlag` | Enable/disable all heating (default: `True`) |
+| `heatingFile` | Path to write detailed rates |
+| `initialTemp` | Starting gas temperature |
+| `baseAv` | Visual extinction (controls UV attenuation) |
+| `zeta` | Cosmic ray ionization rate |
+
+---
+
+## Advanced: Chemical Reaction Enthalpy
+
+UCLCHEM can optionally include enthalpy changes from chemical reactions. Configure via `user_settings.yaml` before rebuilding:
+
+```yaml
+# In Makerates/user_settings.yaml
+add_delta_enthalpy: GAS   # False | GAS | ALL
+```
+
+Then rebuild:
+
+```bash
+cd Makerates
+python MakeRates.py
+cd ..
+pip install .
+```
+
+---
+
+# Part 2 — Controlling Individual Mechanisms
+
+Now we continue to cover enabling and disabling specific heating and cooling mechanisms in UCLCHEM.
+
+---
+
+## Imports
+
+```{python}
+import matplotlib.pyplot as plt
+import uclchem
+from uclchem import advanced
+```
+
+---
+
+## Step 1: Run Baseline Model with All Mechanisms
+
+```{python}
+param_dict = {
+    "initialDens": 1e4,
+    "initialTemp": 10.0,
+    "finalTime": 1.0e6,
+    "baseAv": 10.0,
+    "rout": 0.1,
+    "freefall": False,
+    "heatingFlag": True,
+}
+
+cloud_full = uclchem.model.Cloud(param_dict=param_dict)
+
+physics_full, abundances_full, rates_full, heating_full = cloud_full.get_dataframes(
+    joined=False, with_rates=True, with_heating=True
+)
+
+print(f"Temperature range: {physics_full['gasTemp'].min():.2f} - {physics_full['gasTemp'].max():.2f} K")
+print(f"Final temperature: {physics_full['gasTemp'].iloc[-1]:.2f} K")
+```
+
+---
+
+## Step 2: Identify the Most Important Processes
+
+```{python}
+heating_cols = [col for col in heating_full.columns if col.endswith("Heating")]
+cooling_cols = [col for col in heating_full.columns if col.endswith("Cooling")]
+
+heating_importance = {col: heating_full[col].abs().sum() for col in heating_cols}
+cooling_importance = {col: heating_full[col].abs().sum() for col in cooling_cols}
+
+heating_sorted = sorted(heating_importance.items(), key=lambda x: x[1], reverse=True)
+cooling_sorted = sorted(cooling_importance.items(), key=lambda x: x[1], reverse=True)
+
+print("TOP 5 HEATING PROCESSES")
+for i, (process, contribution) in enumerate(heating_sorted[:5], 1):
+    print(f"{i}. {process.replace('Heating_', ''):40s} {contribution:.2e}")
+
+print("\nTOP 5 COOLING PROCESSES")
+for i, (process, contribution) in enumerate(cooling_sorted[:5], 1):
+    print(f"{i}. {process.replace('Cooling_', ''):40s} {contribution:.2e}")
+```
+
+---
+
+## Step 3: Visualize the Dominant Processes
+
+```{python}
+fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+time = heating_full["Time"]
+
+for process, _ in heating_sorted[:5]:
+    label = process.replace("Heating_", "")
+    axes[0].plot(time, heating_full[process], label=label, linewidth=2, alpha=0.8)
+
+axes[0].set_xlabel("Time (years)", fontsize=12)
+axes[0].set_ylabel("Heating Rate (erg cm⁻³ s⁻¹)", fontsize=12)
+axes[0].set_xscale("log")
+axes[0].set_yscale("symlog", linthresh=1e-30)
+axes[0].set_title("Top 5 Heating Processes", fontsize=14, fontweight="bold")
+axes[0].legend(fontsize=10)
+axes[0].grid(True, alpha=0.3)
+
+for process, _ in cooling_sorted[:5]:
+    label = process.replace("Cooling_", "").replace("LineCooling_", "")
+    axes[1].plot(time, heating_full[process], label=label, linewidth=2, alpha=0.8)
+
+axes[1].set_xlabel("Time (years)", fontsize=12)
+axes[1].set_ylabel("Cooling Rate (erg cm⁻³ s⁻¹)", fontsize=12)
+axes[1].set_xscale("log")
+axes[1].set_yscale("symlog", linthresh=1e-30)
+axes[1].set_title("Top 5 Cooling Processes", fontsize=14, fontweight="bold")
+axes[1].legend(fontsize=10)
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Step 4: Introduction to HeatingSettings
+
+The `HeatingSettings` class allows you to control individual mechanisms.
+
+```{python}
+settings = advanced.HeatingSettings()
+
+heating_mechanisms = settings.get_heating_modules()
+cooling_mechanisms = settings.get_cooling_modules()
+
+print("AVAILABLE HEATING MECHANISMS:")
+for mech, active in heating_mechanisms.items():
+    status = "ACTIVE" if active else "INACTIVE"
+    print(f"  {mech:40s} {status}")
+
+print("\nAVAILABLE COOLING MECHANISMS:")
+for mech, active in cooling_mechanisms.items():
+    status = "ACTIVE" if active else "INACTIVE"
+    print(f"  {mech:40s} {status}")
+```
+
+---
+
+## Step 5: Disable the Most Important Mechanisms
+
+```{python}
+# Disable H2 formation heating (often important)
+settings.set_heating_mechanism(settings.H2_FORMATION, False)
+print("Disabled: H2 Formation Heating")
+
+# Disable line cooling (dominant cooling in molecular clouds)
+settings.set_cooling_mechanism(settings.MOLECULAR_LINE_COOLING, False)
+print("Disabled: Molecular Line Cooling")
+```
+
+---
+
+## Step 6: Run Model with Disabled Mechanisms
+
+```{python}
+cloud_limited = uclchem.model.Cloud(param_dict=param_dict)
+
+physics_limited, abundances_limited, rates_limited, heating_limited = (
+    cloud_limited.get_dataframes(joined=False, with_rates=True, with_heating=True)
+)
+
+print(f"Temperature range: {physics_limited['gasTemp'].min():.2f} - {physics_limited['gasTemp'].max():.2f} K")
+print(f"Final temperature: {physics_limited['gasTemp'].iloc[-1]:.2f} K")
+
+settings.reset_to_defaults()
+print("\nSettings reset to defaults.")
+```
+
+---
+
+## Step 7: Compare Temperature Evolution
+
+```{python}
+fig, ax = plt.subplots(figsize=(12, 6))
+
+ax.plot(physics_full["Time"], physics_full["gasTemp"],
+        label="All Mechanisms Active", linewidth=2.5, color="darkblue")
+ax.plot(physics_limited["Time"], physics_limited["gasTemp"],
+        label="Key Mechanisms Disabled", linewidth=2.5, color="darkred", linestyle="--")
+
+ax.set_xlabel("Time (years)", fontsize=12)
+ax.set_ylabel("Gas Temperature (K)", fontsize=12)
+ax.set_xscale("log")
+ax.set_title("Temperature Evolution: Impact of Disabling Key Mechanisms",
+             fontsize=14, fontweight="bold")
+ax.legend(fontsize=11)
+ax.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Step 8: Compare Chemical Abundances
+
+```{python}
+key_species = ["CO", "H2O", "OH", "NH3"]
+fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+axes = axes.flatten()
+
+for idx, species in enumerate(key_species):
+    if species in abundances_full.columns and species in abundances_limited.columns:
+        axes[idx].plot(physics_full["Time"], abundances_full[species],
+                       label="All Mechanisms", linewidth=2.5, color="darkblue")
+        axes[idx].plot(physics_full["Time"], abundances_limited[species],
+                       label="Key Mechanisms Disabled", linewidth=2.5,
+                       color="darkred", linestyle="--")
+        axes[idx].set_xlabel("Time (years)", fontsize=11)
+        axes[idx].set_ylabel("Abundance", fontsize=11)
+        axes[idx].set_xscale("log")
+        axes[idx].set_yscale("log")
+        axes[idx].set_title(f"{species} Abundance", fontsize=13, fontweight="bold")
+        axes[idx].legend(fontsize=9)
+        axes[idx].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Step 9: Compare Total Heating and Cooling Rates
+
+```{python}
+total_heating_full = heating_full[[c for c in heating_full.columns if c.endswith("Heating")]].sum(axis=1)
+total_cooling_full = heating_full[[c for c in heating_full.columns if c.endswith("Cooling")]].sum(axis=1)
+total_heating_limited = heating_limited[[c for c in heating_limited.columns if c.endswith("Heating")]].sum(axis=1)
+total_cooling_limited = heating_limited[[c for c in heating_limited.columns if c.endswith("Cooling")]].sum(axis=1)
+
+fig, axes = plt.subplots(2, 1, figsize=(12, 10))
+
+axes[0].plot(physics_full["Time"], total_heating_full,
+             label="All Mechanisms", linewidth=2.5, color="darkred")
+axes[0].plot(physics_limited["Time"], total_heating_limited,
+             label="Key Mechanisms Disabled", linewidth=2.5, color="orange", linestyle="--")
+axes[0].set_xlabel("Time (years)", fontsize=12)
+axes[0].set_ylabel("Total Heating Rate (erg cm⁻³ s⁻¹)", fontsize=12)
+axes[0].set_xscale("log")
+axes[0].set_yscale("symlog", linthresh=1e-30)
+axes[0].set_title("Total Heating Rate Comparison", fontsize=14, fontweight="bold")
+axes[0].legend(fontsize=11)
+axes[0].grid(True, alpha=0.3)
+
+axes[1].plot(physics_full["Time"], total_cooling_full,
+             label="All Mechanisms", linewidth=2.5, color="darkblue")
+axes[1].plot(physics_limited["Time"], total_cooling_limited,
+             label="Key Mechanisms Disabled", linewidth=2.5, color="cyan", linestyle="--")
+axes[1].set_xlabel("Time (years)", fontsize=12)
+axes[1].set_ylabel("Total Cooling Rate (erg cm⁻³ s⁻¹)", fontsize=12)
+axes[1].set_xscale("log")
+axes[1].set_yscale("symlog", linthresh=1e-30)
+axes[1].set_title("Total Cooling Rate Comparison", fontsize=14, fontweight="bold")
+axes[1].legend(fontsize=11)
+axes[1].grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+---
+
+## Summary
+
+::: {.incremental}
+1. Run a **baseline model** with all mechanisms enabled
+2. **Analyze** which processes dominate (integrated contribution)
+3. **Disable specific mechanisms** using `HeatingSettings`
+4. **Compare models** to quantify the impact
+:::
+
+---
+
+## HeatingSettings Reference
+
+**Methods:**
+
+- `get_heating_modules()` — list all heating mechanisms and status
+- `get_cooling_modules()` — list all cooling mechanisms and status
+- `set_heating_mechanism(mechanism, active)` — enable/disable
+- `set_cooling_mechanism(mechanism, active)` — enable/disable
+- `reset_to_defaults()` — reset all to defaults
